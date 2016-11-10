@@ -1,0 +1,96 @@
+#!/bin/bash
+source bayan.conf
+
+case "$1" in
+    "init")
+        #Dark Knight Rises
+        ip link set mtu 1532 dev $mesh_if
+        iwconfig $mesh_if mode ad-hoc essid bnets-mesh ap 00:01:02:03:04:05 channel 1
+        batctl if add $mesh_if
+        ip link set up dev $mesh_if
+        ip link set up dev bat0
+        ip addr add ${mesh_ip} dev bat0
+        ip route add ${mesh_ip%.*}.0/24 dev bat0 proto kernel scope link src ${mesh_ip}
+
+        iptables-restore < ${BAYAN_PATH}/bayan_iptables
+        create_ap ${ap_if} ${homenet_if} ${ssid} ${ap_pwd} &
+        ;;
+
+    "install")
+        iptables -t nat -A POSTROUTING -j MASQUERADE
+
+        ip link set mtu 1532 dev $mesh_if
+        iwconfig $mesh_if mode ad-hoc essid bnets-mesh ap 00:01:02:03:04:05 channel 1
+        batctl if add $mesh_if
+        ip link set up dev $mesh_if
+        ip link set up dev bat0
+        ip addr add ${mesh_ip} dev bat0
+        ip route add ${mesh_ip%.*}.0/24 dev bat0 proto kernel scope link src ${mesh_ip}
+
+
+        conn_cnt=$((gw_count + 1))
+        for N in $(seq 1 $conn_cnt)
+        do
+            ip rule add fwmark $N table $N
+            ip route add ${mesh_ip%.*}.0/24 dev bat0 proto kernel scope link src ${mesh_ip} table ${N}
+            ip route add ${homenet_ip%.*}.0/24 dev ${homenet_if} proto kernel scope link src ${homenet_ip} table ${N}
+
+            iptables -t mangle -N MARK${N}
+            iptables -t nat -N MARK${N}
+            iptables -t nat -I POSTROUTING ${N} -m mark --mark ${N} -j MARK${N}
+            iptables -t mangle -A MARK${N} -j MARK --set-mark ${N}
+            iptables -t mangle -A MARK${N} -j CONNMARK --save-mark
+
+            if [[ N -eq 1 ]]; then
+                ip route add default via ${homenet_gw} dev ${homenet_if} table ${N}
+                iptables -t mangle -A PREROUTING -i ap0 -m conntrack --ctstate         NEW -m statistic --mode random --probability 1 -j MARK${N}
+            else
+                #Won't use neighbors' uplink by default
+                ip route add default via ${gw_list[((N - 2))]} dev bat0 table ${N}
+                iptables -t mangle -A PREROUTING -i ap0 -m conntrack --ctstate         NEW -m statistic --mode random --probability 0 -j MARK${N}
+            fi
+        done
+
+        ln -s ${BAYAN_PATH}/bayan /usr/local/sbin
+        iptables-save > ${BAYAN_PATH}/bayan_iptables
+        ;;
+
+    "add")
+        sed -i "/#end of list/ { N; s/#end of list\n/$2\n&/ }" bayan.conf
+        n=$((gw_count + 1))
+        ip rule add fwmark ${n} table ${n}
+        ip route add ${mesh_ip%.*}.0/24 dev bat0 proto kernel scope link src ${mesh_ip} table ${n}
+        ip route add ${homenet_ip%.*}.0/24 dev ${homenet_if} proto kernel scope link src ${homenet_ip} table ${n}
+
+        iptables -t mangle -N MARK${n}
+        iptables -t nat -N MARK${n}
+        iptables -t nat -I POSTROUTING ${n} -m mark --mark ${n} -j MARK${n}
+        iptables -t mangle -A MARK${n} -j MARK --set-mark ${n}
+        iptables -t mangle -A MARK${n} -j CONNMARK --save-mark
+        ip route add default via $2 dev bat0 table ${N}
+
+        if [ -z "$3" ]; then
+            iptables -t mangle -A PREROUTING -i ap0 -m conntrack --ctstate         NEW -m statistic --mode random --probability 0 -j MARK${n}
+        else
+            #Probability of using this link given
+            iptables -t mangle -A PREROUTING -i ap0 -m conntrack --ctstate         NEW -m statistic --mode random --probability $3 -j MARK${n}
+        fi
+
+        iptables-save > ${BAYAN_PATH}/bayan_iptables
+        ;;
+
+        "show")
+            conn_cnt=$(iptables -t nat -nvL | grep -c "Chain MARK")
+            for conn in $(seq 1 $conn_cnt)
+                do
+                conn_ip=$(ip route show table ${conn} | grep "default via" | awk '{print $3}')
+                prob=$(iptables -t mangle -nvL | grep "MARK${conn}.*probability" | awk '{print $NF}')
+                echo "${conn}   ${conn_ip}      ${prob}"
+            done
+        ;;
+
+    *)
+        echo "You have failed to specify what to do correctly."
+        exit 1
+        ;;
+esac
