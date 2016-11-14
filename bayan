@@ -60,6 +60,7 @@ case "$1" in
 
         iptables-restore < ${BAYAN_PATH}/bayan_iptables
         create_ap ${ap_if} ${homenet_if} ${ssid} ${ap_pwd} &
+	bayan_rt_tbl
         ;;
 
     "install")
