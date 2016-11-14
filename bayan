@@ -1,6 +1,5 @@
-#!/bin/bash
+#!/bin/bash 
 source bayan.conf
-gw_count=$((wc -l conn.lst))
 
 batman_begins() {
     #Dark Knight Rises
@@ -24,14 +23,15 @@ clean() {
     done
 }
 
-bayan_rt_tbl() {
+update_rt_tbl() {
     ip rule flush
     ip rule add from all lookup main pref 32766
     ip rule add from all lookup default pref 3276
+    gw_count=`wc -l conn.lst | awk '{print $1}'`
     for N in $(seq 1 $gw_count)
         do
-            ip rule add fwmark $N table $N
             ip route flush table ${N}
+	    ip rule add fwmark ${N} table ${N}
             ip route add ${mesh_ip%.*}.0/24 dev bat0 proto kernel scope link src ${mesh_ip} table ${N}
             ip route add ${homenet_ip%.*}.0/24 dev ${homenet_if} proto kernel scope link src ${homenet_ip} table ${N}
             gw=$(cat conn.lst | awk -v n="$N" 'NR==n {print $1}')
@@ -45,11 +45,11 @@ bayan_rt_tbl() {
 }
 
 update_prob() {
-    gw_count=$((wc -l conn.lst))
+    gw_count=`wc -l conn.lst | awk '{print $1}'`
     for N in $(seq 1 $gw_count)
         do
             prob=$(cat conn.lst | awk -v n="$N" 'NR==n {print $2}')
-            iptables -t mangle -R PREROUTING -i ap0 -m conntrack --ctstate         NEW -m statistic --mode random --probability ${prob} -j MARK${N}
+            iptables -t mangle -R PREROUTING ${N} -i ap0 -m conntrack --ctstate         NEW -m statistic --mode random --probability ${prob} -j MARK${N}
     done
 }
 #    sed -i ${1}d n.lst delete line
@@ -60,8 +60,8 @@ case "$1" in
 
         iptables-restore < ${BAYAN_PATH}/bayan_iptables
         create_ap ${ap_if} ${homenet_if} ${ssid} ${ap_pwd} &
-	bayan_rt_tbl
-        ;;
+	update_rt_tbl
+	;;
 
     "install")
         iptables -t nat -A POSTROUTING -j MASQUERADE
@@ -112,7 +112,7 @@ case "$1" in
         iptables -t nat -I POSTROUTING ${n} -m mark --mark ${n} -j MARK${n}
         iptables -t mangle -A MARK${n} -j MARK --set-mark ${n}
         iptables -t mangle -A MARK${n} -j CONNMARK --save-mark
-        ip route add default via $2 dev bat0 table ${N}
+        ip route add default via $2 dev bat0 table ${n}
 
         if [ -z "$3" ]; then
             iptables -t mangle -A PREROUTING -i ap0 -m conntrack --ctstate         NEW -m statistic --mode random --probability 0 -j MARK${n}
@@ -131,12 +131,16 @@ case "$1" in
         fi
 
         to_del=$2
-        iptables -t mangle -D POSTROUTING ${gw_count}
+	ip rule del from all fwmark 0x${gw_count} lookup ${gw_count}
+	ip route flush table ${gw_count}
+        iptables -t mangle -D PREROUTING ${gw_count}
         iptables -t nat -D POSTROUTING ${gw_count}
+	iptables -t mangle -F MARK${gw_count}
         iptables -t nat -X MARK${gw_count}
         iptables -t mangle -X MARK${gw_count}
         sed -i ${to_del}d conn.lst
         update_prob
+	update_rt_tbl
         iptables-save > ${BAYAN_PATH}/bayan_iptables
     ;;
 
