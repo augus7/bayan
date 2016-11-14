@@ -1,16 +1,62 @@
 #!/bin/bash
 source bayan.conf
+gw_count=$((wc -l conn.lst))
+
+batman_begins() {
+    #Dark Knight Rises
+    ip link set mtu 1532 dev $mesh_if
+    iwconfig $mesh_if mode ad-hoc essid bnets-mesh ap 00:01:02:03:04:05 channel 1
+    batctl if add $mesh_if
+    ip link set up dev $mesh_if
+    ip link set up dev bat0
+    ip addr add ${mesh_ip} dev bat0
+    ip route add ${mesh_ip%.*}.0/24 dev bat0 proto kernel scope link src ${mesh_ip}
+}
+
+clean() {
+    ip rule flush
+    ip rule add from all lookup main pref 32766
+    ip rule add from all lookup default pref 32767
+    for N in $(seq 1 $gw_count)
+        do
+            ip route add ${mesh_ip%.*}.0/24 dev bat0 proto kernel scope link src ${mesh_ip} table ${N}
+            ip route add ${homenet_ip%.*}.0/24 dev ${homenet_if} proto kernel scope link src ${homenet_ip} table ${N}
+    done
+}
+
+bayan_rt_tbl() {
+    ip rule flush
+    ip rule add from all lookup main pref 32766
+    ip rule add from all lookup default pref 3276
+    for N in $(seq 1 $gw_count)
+        do
+            ip rule add fwmark $N table $N
+            ip route flush table ${N}
+            ip route add ${mesh_ip%.*}.0/24 dev bat0 proto kernel scope link src ${mesh_ip} table ${N}
+            ip route add ${homenet_ip%.*}.0/24 dev ${homenet_if} proto kernel scope link src ${homenet_ip} table ${N}
+            gw=$(cat conn.lst | awk -v n="$N" 'NR==n {print $1}')
+
+            if [[ N -eq 1 ]]; then
+                ip route add default via ${homenet_gw} dev ${homenet_if} table ${N}
+            else
+                ip route add default via ${gw} dev bat0 table ${N}
+            fi
+    done
+}
+
+update_prob() {
+    gw_count=$((wc -l conn.lst))
+    for N in $(seq 1 $gw_count)
+        do
+            prob=$(cat conn.lst | awk -v n="$N" 'NR==n {print $2}')
+            iptables -t mangle -R PREROUTING -i ap0 -m conntrack --ctstate         NEW -m statistic --mode random --probability ${prob} -j MARK${N}
+    done
+}
+#    sed -i ${1}d n.lst delete line
 
 case "$1" in
     "init")
-        #Dark Knight Rises
-        ip link set mtu 1532 dev $mesh_if
-        iwconfig $mesh_if mode ad-hoc essid bnets-mesh ap 00:01:02:03:04:05 channel 1
-        batctl if add $mesh_if
-        ip link set up dev $mesh_if
-        ip link set up dev bat0
-        ip addr add ${mesh_ip} dev bat0
-        ip route add ${mesh_ip%.*}.0/24 dev bat0 proto kernel scope link src ${mesh_ip}
+        batman_begins
 
         iptables-restore < ${BAYAN_PATH}/bayan_iptables
         create_ap ${ap_if} ${homenet_if} ${ssid} ${ap_pwd} &
@@ -18,18 +64,9 @@ case "$1" in
 
     "install")
         iptables -t nat -A POSTROUTING -j MASQUERADE
+        batman_begins
 
-        ip link set mtu 1532 dev $mesh_if
-        iwconfig $mesh_if mode ad-hoc essid bnets-mesh ap 00:01:02:03:04:05 channel 1
-        batctl if add $mesh_if
-        ip link set up dev $mesh_if
-        ip link set up dev bat0
-        ip addr add ${mesh_ip} dev bat0
-        ip route add ${mesh_ip%.*}.0/24 dev bat0 proto kernel scope link src ${mesh_ip}
-
-
-        conn_cnt=$((gw_count + 1))
-        for N in $(seq 1 $conn_cnt)
+        for N in $(seq 1 $gw_count)
         do
             ip rule add fwmark $N table $N
             ip route add ${mesh_ip%.*}.0/24 dev bat0 proto kernel scope link src ${mesh_ip} table ${N}
@@ -46,17 +83,24 @@ case "$1" in
                 iptables -t mangle -A PREROUTING -i ap0 -m conntrack --ctstate         NEW -m statistic --mode random --probability 1 -j MARK${N}
             else
                 #Won't use neighbors' uplink by default
-                ip route add default via ${gw_list[((N - 2))]} dev bat0 table ${N}
-                iptables -t mangle -A PREROUTING -i ap0 -m conntrack --ctstate         NEW -m statistic --mode random --probability 0 -j MARK${N}
+                gw=$(cat conn.lst | awk -v n="$N" 'NR==n {print $1}')
+                prob=$(cat conn.lst | awk -v n="$N" 'NR==n {print $2}')
+                ip route add default via ${gw} dev bat0 table ${N}
+                iptables -t mangle -A PREROUTING -i ap0 -m conntrack --ctstate         NEW -m statistic --mode random --probability ${prob} -j MARK${N}
             fi
         done
 
         ln -s ${BAYAN_PATH}/bayan /usr/local/sbin
         iptables-save > ${BAYAN_PATH}/bayan_iptables
-        ;;
+    ;;
+
+    "uninstall")
+        rm /usr/local/sbin/bayan
+        rm ${BAYAN_PATH}/bayan_iptables
+    ;;
 
     "add")
-        sed -i "/#end of list/ { N; s/#end of list\n/$2\n&/ }" bayan.conf
+        echo "${2} ${3}" >> conn.lst
         n=$((gw_count + 1))
         ip rule add fwmark ${n} table ${n}
         ip route add ${mesh_ip%.*}.0/24 dev bat0 proto kernel scope link src ${mesh_ip} table ${n}
@@ -77,17 +121,35 @@ case "$1" in
         fi
 
         iptables-save > ${BAYAN_PATH}/bayan_iptables
-        ;;
+    ;;
 
-        "show")
-            conn_cnt=$(iptables -t nat -nvL | grep -c "Chain MARK")
-            for conn in $(seq 1 $conn_cnt)
-                do
-                conn_ip=$(ip route show table ${conn} | grep "default via" | awk '{print $3}')
-                prob=$(iptables -t mangle -nvL | grep "MARK${conn}.*probability" | awk '{print $NF}')
-                echo "${conn}   ${conn_ip}      ${prob}"
-            done
-        ;;
+    "remove")
+        if [ "$2" -eq 1 ]; then
+            echo "You can't delete conn#1"
+            exit 0
+        fi
+
+        to_del=$2
+        iptables -t mangle -D POSTROUTING ${gw_count}
+        iptables -t nat -D POSTROUTING ${gw_count}
+        iptables -t nat -X MARK${gw_count}
+        iptables -t mangle -X MARK${gw_count}
+        sed -i ${to_del}d conn.lst
+        update_prob
+        iptables-save > ${BAYAN_PATH}/bayan_iptables
+    ;;
+
+    "show")
+        conn_cnt=$(iptables -t nat -nvL | grep -c "Chain MARK")
+        conn_id=1
+        for conn in $(seq 1 $conn_cnt)
+            do
+            conn_ip=$(ip route show table ${conn} | grep "default via" | awk '{print $3}')
+            prob=$(iptables -t mangle -nvL | grep "MARK${conn}.*probability" | awk '{print $NF}')
+            echo "${conn_id}: ${conn}   ${conn_ip}      ${prob}"
+            conn_id=$(( conn_id + 1 ))
+        done
+    ;;
 
     *)
         echo "You have failed to specify what to do correctly."
