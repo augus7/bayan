@@ -1,6 +1,7 @@
 #!/bin/bash -x
 BAYAN_PATH=${HOME}/bayan
 source ${BAYAN_PATH}/bayan.conf
+gw_count=`wc -l ${BAYAN_PATH}/conn.lst | awk '{print $1}'`
 
 batman_begins() {
     #Dark Knight Rises
@@ -8,20 +9,9 @@ batman_begins() {
     iwconfig $mesh_if mode ad-hoc essid bnets-mesh ap 00:01:02:03:04:05 channel 1
     batctl if add $mesh_if
     ip link set up dev $mesh_if
-    ip link set up dev bat0
-    ip addr add ${mesh_ip} dev bat0
-    ip route add ${mesh_ip%.*}.0/24 dev bat0 proto kernel scope link src ${mesh_ip}
-}
-
-clean() {
-    ip rule flush
-    ip rule add from all lookup main pref 32766
-    ip rule add from all lookup default pref 32767
-    for N in $(seq 1 $gw_count)
-        do
-            ip route add ${mesh_ip%.*}.0/24 dev bat0 proto kernel scope link src ${mesh_ip} table ${N}
-            ip route add ${homenet_ip%.*}.0/24 dev ${homenet_if} proto kernel scope link src ${homenet_ip} table ${N}
-    done
+    ip link set up dev ${neigh_if}
+    ip addr add ${mesh_ip} dev ${neigh_if}
+    ip route add ${mesh_ip%.*}.0/24 dev ${neigh_if} proto kernel scope link src ${mesh_ip}
 }
 
 update_rt_tbl() {
@@ -32,15 +22,15 @@ update_rt_tbl() {
     for N in $(seq 1 $gw_count)
         do
             ip route flush table ${N}
-	    ip rule add fwmark ${N} table ${N}
-            ip route add ${mesh_ip%.*}.0/24 dev bat0 proto kernel scope link src ${mesh_ip} table ${N}
+	        ip rule add fwmark ${N} table ${N}
+            ip route add ${mesh_ip%.*}.0/24 dev ${neigh_if} proto kernel scope link src ${mesh_ip} table ${N}
             ip route add ${homenet_ip%.*}.0/24 dev ${homenet_if} proto kernel scope link src ${homenet_ip} table ${N}
             gw=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $1}')
 
             if [[ N -eq 1 ]]; then
                 ip route add default via ${homenet_gw} dev ${homenet_if} table ${N}
             else
-                ip route add default via ${gw} dev bat0 table ${N}
+                ip route add default via ${gw} dev ${neigh_if} table ${N}
             fi
     done
 }
@@ -57,8 +47,9 @@ update_prob() {
 
 case "$1" in
     "init")
-        batman_begins
-
+        if [[ "$neigh_if" == "bat0" ]]; then
+            batman_begins
+        fi
         iptables-restore < ${BAYAN_PATH}/bayan_iptables
         create_ap ${ap_if} ${homenet_if} ${ssid} ${ap_pwd} &
 	update_rt_tbl
@@ -66,12 +57,15 @@ case "$1" in
 
     "install")
         iptables -t nat -A POSTROUTING -j MASQUERADE
-        batman_begins
 
+        if [[ "$neigh_if" == "bat0" ]]; then
+            batman_begins
+        fi
+        
         for N in $(seq 1 $gw_count)
         do
             ip rule add fwmark $N table $N
-            ip route add ${mesh_ip%.*}.0/24 dev bat0 proto kernel scope link src ${mesh_ip} table ${N}
+            ip route add ${mesh_ip%.*}.0/24 dev ${neigh_if} proto kernel scope link src ${mesh_ip} table ${N}
             ip route add ${homenet_ip%.*}.0/24 dev ${homenet_if} proto kernel scope link src ${homenet_ip} table ${N}
 
             iptables -t mangle -N MARK${N}
@@ -87,7 +81,7 @@ case "$1" in
                 #Won't use neighbors' uplink by default
                 gw=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $1}')
                 prob=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $2}')
-                ip route add default via ${gw} dev bat0 table ${N}
+                ip route add default via ${gw} dev ${neigh_if} table ${N}
                 iptables -t mangle -A PREROUTING -i ap0 -m conntrack --ctstate         NEW -m statistic --mode random --probability ${prob} -j MARK${N}
             fi
         done
@@ -105,7 +99,7 @@ case "$1" in
         echo "${2} ${3}" >> ${BAYAN_PATH}/conn.lst
         n=$((gw_count + 1))
         ip rule add fwmark ${n} table ${n}
-        ip route add ${mesh_ip%.*}.0/24 dev bat0 proto kernel scope link src ${mesh_ip} table ${n}
+        ip route add ${mesh_ip%.*}.0/24 dev ${neigh_if} proto kernel scope link src ${mesh_ip} table ${n}
         ip route add ${homenet_ip%.*}.0/24 dev ${homenet_if} proto kernel scope link src ${homenet_ip} table ${n}
 
         iptables -t mangle -N MARK${n}
@@ -113,7 +107,7 @@ case "$1" in
         iptables -t nat -I POSTROUTING ${n} -m mark --mark ${n} -j MARK${n}
         iptables -t mangle -A MARK${n} -j MARK --set-mark ${n}
         iptables -t mangle -A MARK${n} -j CONNMARK --save-mark
-        ip route add default via $2 dev bat0 table ${n}
+        ip route add default via $2 dev ${neigh_if} table ${n}
 
         if [ -z "$3" ]; then
             iptables -t mangle -A PREROUTING -i ap0 -m conntrack --ctstate         NEW -m statistic --mode random --probability 0 -j MARK${n}
@@ -139,7 +133,7 @@ case "$1" in
 	iptables -t mangle -F MARK${gw_count}
         iptables -t nat -X MARK${gw_count}
         iptables -t mangle -X MARK${gw_count}
-        sed -i ${to_del}d conn.lst
+        sed -i ${to_del}d ${BAYAN_PATH}/conn.lst
         update_prob
 	update_rt_tbl
         iptables-save > ${BAYAN_PATH}/bayan_iptables
