@@ -119,7 +119,7 @@ case "$1" in
             exit 0
         fi
         restore
-        sed -i ${to_del}d ${BAYAN_PATH}/conn.lst
+        sed -i $2 ${BAYAN_PATH}/conn.lst
         load
     ;;
 
