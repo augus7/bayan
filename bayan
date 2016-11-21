@@ -131,7 +131,7 @@ case "$1" in
         gw=$(sed '$2q;d' conn.lst  | awk '{print $1}')
         intf=$(sed '$2q;d' conn.lst  | awk '{print $2}')
         prob=$(sed '$2q;d' conn.lst  | awk '{print $3}')
-        ip route replace default via ${gw} dev $intf
+        ip route replace default via ${gw} dev $intf table $2
         iptables -t mangle -R PREROUTING ${N} -i ${client_if} -m conntrack --ctstate     NEW -m statistic --mode random --probability ${prob} -j MARK${N}
     ;;
 
