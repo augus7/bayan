@@ -123,6 +123,18 @@ case "$1" in
         load
     ;;
 
+    "disable")
+        iptables -t mangle -R PREROUTING ${N} -i ${client_if} -m conntrack --ctstate     NEW -m statistic --mode random --probability 0 -j MARK${N}
+    ;;
+
+    "enable")
+        gw=$(sed '$2q;d' conn.lst  | awk '{print $1}')
+        intf=$(sed '$2q;d' conn.lst  | awk '{print $2}')
+        prob=$(sed '$2q;d' conn.lst  | awk '{print $3}')
+        ip route replace default via ${gw} dev $intf
+        iptables -t mangle -R PREROUTING ${N} -i ${client_if} -m conntrack --ctstate     NEW -m statistic --mode random --probability ${prob} -j MARK${N}
+    ;;
+
     "show")
         conn_cnt=$(iptables -t nat -nvL | grep -c "Chain MARK")
         conn_id=1
