@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash 
 BAYAN_PATH=${HOME}/bayan
 source ${BAYAN_PATH}/bayan.conf
 
@@ -21,7 +21,7 @@ clean_table() {
 		intf=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $2}')
 		prob=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $3}')
 
-		iptables -t mangle -D PREROUTING ${N}
+		iptables -t mangle -D PREROUTING 1
 
 		iptables -t mangle -F MARK${N}
 		iptables -t mangle -X MARK${N}
@@ -119,7 +119,7 @@ case "$1" in
             exit 0
         fi
         restore
-        sed -i $2 ${BAYAN_PATH}/conn.lst
+        sed -i $2d ${BAYAN_PATH}/conn.lst
         load
     ;;
 
