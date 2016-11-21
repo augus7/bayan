@@ -128,12 +128,18 @@ case "$1" in
     ;;
 
     "enable")
-        gw=$(sed "$2q;d" conn.lst  | awk '{print $1}')
-        intf=$(sed "$2q;d" conn.lst  | awk '{print $2}')
-        prob=$(sed "$2q;d" conn.lst  | awk '{print $3}')
-	echo "gw: ${gw}	intf: ${intf}	prob: ${prob}"
+        gw=$(sed "$2q;d" ${BAYAN_PATH}/conn.lst  | awk '{print $1}')
+        intf=$(sed "$2q;d" ${BAYAN_PATH}/conn.lst  | awk '{print $2}')
+        prob=$(sed "$2q;d" ${BAYAN_PATH}/conn.lst  | awk '{print $3}')
         ip route replace default via ${gw} dev $intf table $2
         iptables -t mangle -R PREROUTING $2 -i ${client_if} -m conntrack --ctstate     NEW -m statistic --mode random --probability ${prob} -j MARK$2
+    ;;
+
+    "change")
+        old=$(sed "$2q;d" ${BAYAN_PATH}/conn.lst)
+        sed -i "s/${old}/${3} ${4} ${5}/g" ${BAYAN_PATH}/conn.lst
+        ip route replace default via ${3} dev ${4} table ${2}
+        iptables -t mangle -R PREROUTING ${2} -i ${client_if} -m conntrack --ctstate     NEW -m statistic --mode random --probability ${5} -j MARK${2}
     ;;
 
     "show")
