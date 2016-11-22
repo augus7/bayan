@@ -1,4 +1,4 @@
-#!/bin/bash 
+#!/bin/bash
 BAYAN_PATH=${HOME}/bayan
 source ${BAYAN_PATH}/bayan.conf
 
@@ -17,10 +17,6 @@ clean_table() {
 	gw_count=`wc -l ${BAYAN_PATH}/conn.lst | awk '{print $1}'`
 	for N in $(seq 1 $gw_count)
 	do
-		gw=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $1}')
-		intf=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $2}')
-		prob=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $3}')
-
 		iptables -t mangle -D PREROUTING 1
 
 		iptables -t mangle -F MARK${N}
@@ -49,6 +45,7 @@ load() { #Loads conn.lst
         intf=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $2}')
         prob=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $3}')
 
+
         ip rule add fwmark ${N} table ${N}
         ip route add ${mesh_ip%.*}.0/24 dev ${neigh_if} proto kernel scope link src ${mesh_ip} table ${N}
         ip route add ${homenet_ip%.*}.0/24 dev ${homenet_if} proto kernel scope link src ${homenet_ip} table ${N}
@@ -59,8 +56,8 @@ load() { #Loads conn.lst
         iptables -t nat -I POSTROUTING ${N} -m mark --mark ${N} -j MARK${N}
         iptables -t mangle -A MARK${N} -j MARK --set-mark ${N}
         iptables -t mangle -A MARK${N} -j CONNMARK --save-mark
-
         iptables -t mangle -I PREROUTING ${N} -i ${client_if} -m conntrack --ctstate     NEW -m statistic --mode random --probability ${prob} -j MARK${N}
+
     done
 
     iptables-save > ${BAYAN_PATH}/bayan_iptables
@@ -100,6 +97,7 @@ case "$1" in
     ;;
 
     "uninstall")
+        restore
         rm /usr/local/sbin/bayan
         rm ${BAYAN_PATH}/bayan_iptables
         rm ${BAYAN_PATH}/bayan_iprules
@@ -109,7 +107,7 @@ case "$1" in
 
     "add")
         restore
-        echo "${2} ${3} ${4}" >> ${BAYAN_PATH}/conn.lst
+        echo "${2} ${3} ${4} ${5}" >> ${BAYAN_PATH}/conn.lst
         load
     ;;
 
@@ -137,7 +135,7 @@ case "$1" in
 
     "change")
         old=$(sed "$2q;d" ${BAYAN_PATH}/conn.lst)
-        sed -i "s/${old}/${3} ${4} ${5}/g" ${BAYAN_PATH}/conn.lst
+        sed -i "s/${old}/${3} ${4} ${5} ${6}/g" ${BAYAN_PATH}/conn.lst
         ip route replace default via ${3} dev ${4} table ${2}
         iptables -t mangle -R PREROUTING ${2} -i ${client_if} -m conntrack --ctstate     NEW -m statistic --mode random --probability ${5} -j MARK${2}
     ;;
