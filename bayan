@@ -14,21 +14,21 @@ batman_begins() {
 }
 
 clean_table() {
+    #Removes chains and rules created by bayanihanets
 	gw_count=`wc -l ${BAYAN_PATH}/conn.lst | awk '{print $1}'`
 	for N in $(seq 1 $gw_count)
 	do
 		iptables -t mangle -D PREROUTING 1
-
 		iptables -t mangle -F MARK${N}
 		iptables -t mangle -X MARK${N}
 	done
 }
 
 restore() {
+    #Revert back to pre-loadsharing state
     ip rule flush && ${BAYAN_PATH}/iprule.ORIGINAL
     clean_table
     iptables-restore < ${BAYAN_PATH}/iptables.ORIGINAL
-
     gw_count=`wc -l ${BAYAN_PATH}/conn.lst | awk '{print $1}'`
     for N in $(seq 1 $gw_count)
     do
@@ -36,7 +36,8 @@ restore() {
     done
 }
 
-load() { #Loads conn.lst
+load() {
+    #Balance load among the hosts in conn.lst
     iptables -t nat -A POSTROUTING -j MASQUERADE
     gw_count=`wc -l ${BAYAN_PATH}/conn.lst | awk '{print $1}'`
     for N in $(seq 1 $gw_count)
@@ -69,7 +70,6 @@ case "$1" in
         restore
         ip rule restore < ${BAYAN_PATH}/bayan_iprules
         iptables-restore < ${BAYAN_PATH}/bayan_iptables
-
         if [[ "$neigh_if" == "bat0" ]]; then
             batman_begins
         fi
@@ -84,11 +84,9 @@ case "$1" in
 
     "install")
         iptables-save > ${BAYAN_PATH}/iptables.ORIGINAL
-
-	echo "#!/bin/bash" > iprule.ORIGINAL
-	ip rule show | sed 's/[:-]/ /g' | awk '$0="ip rule add priority "$0' >> ${BAYAN_PATH}/iprule.ORIGINAL
-	chmod +x iprule.ORIGINAL
-
+        echo "#!/bin/bash" > iprule.ORIGINAL
+        ip rule show | sed 's/[:-]/ /g' | awk '$0="ip rule add priority "$0' >> ${BAYAN_PATH}/iprule.ORIGINAL
+        chmod +x iprule.ORIGINAL
         if [[ "$neigh_if" == "bat0" ]]; then
             batman_begins
         fi
@@ -106,12 +104,20 @@ case "$1" in
     ;;
 
     "add")
+        if [ $# -ne 5 ]; then
+            echo -e "Insufficient arguments. \nex: bayan add [new_ip] [new_inteface] [new_probability] [new_hostname]"
+            exit 1
+        fi
         restore
         echo "${2} ${3} ${4} ${5}" >> ${BAYAN_PATH}/conn.lst
         load
     ;;
 
     "remove")
+        if [ $# -ne 2 ]; then
+            echo -e "Insufficient arguments. \nex: bayan remove [conn_id]"
+            exit 1
+        fi
         if [ "$2" -eq 1 ]; then
             echo "You can't delete conn#1"
             exit 0
@@ -122,10 +128,18 @@ case "$1" in
     ;;
 
     "disable")
+        if [ $# -ne 2 ]; then
+            echo -e "Insufficient arguments. \nex: bayan disable [conn_id]"
+            exit 1
+        fi
         iptables -t mangle -R PREROUTING $2 -i ${client_if} -m conntrack --ctstate     NEW -m statistic --mode random --probability 0 -j MARK$2
     ;;
 
     "enable")
+        if [ $# -ne 2 ]; then
+            echo -e "Insufficient arguments. \nex: bayan enable [conn_id]"
+            exit 1
+        fi
         gw=$(sed "$2q;d" ${BAYAN_PATH}/conn.lst  | awk '{print $1}')
         intf=$(sed "$2q;d" ${BAYAN_PATH}/conn.lst  | awk '{print $2}')
         prob=$(sed "$2q;d" ${BAYAN_PATH}/conn.lst  | awk '{print $3}')
@@ -134,6 +148,10 @@ case "$1" in
     ;;
 
     "change")
+        if [ $# -ne 6 ]; then
+            echo -e "Insufficient arguments. \nex: bayan add [old_id] [new_ip] [new_inteface] [new_probability] [new_hostname]"
+            exit 1
+        fi
         old=$(sed "$2q;d" ${BAYAN_PATH}/conn.lst)
         sed -i "s/${old}/${3} ${4} ${5} ${6}/g" ${BAYAN_PATH}/conn.lst
         ip route replace default via ${3} dev ${4} table ${2}
