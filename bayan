@@ -60,7 +60,6 @@ load() {
     done
 
     iptables-save > ${BAYAN_PATH}/bayan_iptables
-
     echo "#!/bin/bash" > ${BAYAN_PATH}/bayan_iprules
     ip rule show | sed 's/[:-]/ /g' | awk '$0="ip rule add priority "$0' >> ${BAYAN_PATH}/bayan_iprules
     chmod +x ${BAYAN_PATH}/bayan_iprules
@@ -68,7 +67,7 @@ load() {
 
 case "$1" in
     "start")
-	ip rule flush && ${BAYAN_PATH}/bayan_iprules
+	    ip rule flush && ${BAYAN_PATH}/bayan_iprules
         iptables-restore < ${BAYAN_PATH}/bayan_iptables
         if [[ "$neigh_if" == "bat0" ]]; then
             batman_begins
@@ -76,8 +75,8 @@ case "$1" in
         gw_count=`wc -l ${BAYAN_PATH}/conn.lst | awk '{print $1}'`
         for N in $(seq 1 $gw_count)
         do
-	    gw=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $1}')
-	    intf=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $2}')
+	        gw=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $1}')
+	        intf=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $2}')
             ip route add ${mesh_ip%.*}.0/24 dev ${neigh_if} proto kernel scope link src ${mesh_ip} table ${N}
             ip route add ${homenet_ip%.*}.0/24 dev ${homenet_if} proto kernel scope link src ${homenet_ip} table ${N}
             ip route add default via ${gw} dev ${intf} table ${N}
@@ -111,9 +110,29 @@ case "$1" in
             echo -e "Insufficient arguments. \nex: bayan add [new_ip] [new_inteface] [new_probability] [new_hostname]"
             exit 1
         fi
-        restore
+
         echo "${2} ${3} ${4} ${5}" >> ${BAYAN_PATH}/conn.lst
-        load
+        gw=$2
+        intf=$3
+        prob=$4
+        N=`wc -l ${BAYAN_PATH}/conn.lst | awk '{print $1}'`
+
+        ip rule add fwmark ${N} table ${N}
+        ip route add ${mesh_ip%.*}.0/24 dev ${neigh_if} proto kernel scope link src ${mesh_ip} table ${N}
+        ip route add ${homenet_ip%.*}.0/24 dev ${homenet_if} proto kernel scope link src ${homenet_ip} table ${N}
+        ip route add default via ${gw} dev ${intf} table ${N}
+
+        iptables -t mangle -N MARK${N}
+        iptables -t nat -N MARK${N}
+        iptables -t nat -I POSTROUTING ${N} -m mark --mark ${N} -j MARK${N}
+        iptables -t mangle -A MARK${N} -j MARK --set-mark ${N}
+        iptables -t mangle -A MARK${N} -j CONNMARK --save-mark
+        iptables -t mangle -I PREROUTING ${N} -i ${client_if} -m conntrack --ctstate     NEW -m statistic --mode random --probability ${prob} -j MARK${N}
+
+        iptables-save > ${BAYAN_PATH}/bayan_iptables
+        echo "#!/bin/bash" > ${BAYAN_PATH}/bayan_iprules
+        ip rule show | sed 's/[:-]/ /g' | awk '$0="ip rule add priority "$0' >> ${BAYAN_PATH}/bayan_iprules
+        chmod +x ${BAYAN_PATH}/bayan_iprules
     ;;
 
     "remove")
@@ -159,6 +178,7 @@ case "$1" in
         sed -i "s/${old}/${3} ${4} ${5} ${6}/g" ${BAYAN_PATH}/conn.lst
         ip route replace default via ${3} dev ${4} table ${2}
         iptables -t mangle -R PREROUTING ${2} -i ${client_if} -m conntrack --ctstate     NEW -m statistic --mode random --probability ${5} -j MARK${2}
+        iptables-save > ${BAYAN_PATH}/bayan_iptables
     ;;
 
     "show")
