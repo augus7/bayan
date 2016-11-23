@@ -46,7 +46,6 @@ load() {
         intf=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $2}')
         prob=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $3}')
 
-
         ip rule add fwmark ${N} table ${N}
         ip route add ${mesh_ip%.*}.0/24 dev ${neigh_if} proto kernel scope link src ${mesh_ip} table ${N}
         ip route add ${homenet_ip%.*}.0/24 dev ${homenet_if} proto kernel scope link src ${homenet_ip} table ${N}
@@ -58,7 +57,6 @@ load() {
         iptables -t mangle -A MARK${N} -j MARK --set-mark ${N}
         iptables -t mangle -A MARK${N} -j CONNMARK --save-mark
         iptables -t mangle -I PREROUTING ${N} -i ${client_if} -m conntrack --ctstate     NEW -m statistic --mode random --probability ${prob} -j MARK${N}
-
     done
 
     iptables-save > ${BAYAN_PATH}/bayan_iptables
@@ -80,6 +78,7 @@ case "$1" in
             ip route add ${homenet_ip%.*}.0/24 dev ${homenet_if} proto kernel scope link src ${homenet_ip} table ${N}
             ip route add default via ${gw} dev ${intf} table ${N}
         done
+        create_ap ${homenet_if} ${ap_if} ${ssid} ${ap_pwd} &
     ;;
 
     "install")
