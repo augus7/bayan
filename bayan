@@ -60,13 +60,15 @@ load() {
     done
 
     iptables-save > ${BAYAN_PATH}/bayan_iptables
-    ip rule save > ${BAYAN_PATH}/bayan_iprules
+
+    echo "#!/bin/bash" > ${BAYAN_PATH}/bayan_iprules
+    ip rule show | sed 's/[:-]/ /g' | awk '$0="ip rule add priority "$0' >> ${BAYAN_PATH}/bayan_iprules
+    chmod +x ${BAYAN_PATH}/bayan_iprules
 }
 
 case "$1" in
     "start")
-        restore
-        ip rule restore < ${BAYAN_PATH}/bayan_iprules
+	ip rule flush && ${BAYAN_PATH}/bayan_iprules
         iptables-restore < ${BAYAN_PATH}/bayan_iptables
         if [[ "$neigh_if" == "bat0" ]]; then
             batman_begins
@@ -74,18 +76,20 @@ case "$1" in
         gw_count=`wc -l ${BAYAN_PATH}/conn.lst | awk '{print $1}'`
         for N in $(seq 1 $gw_count)
         do
+	    gw=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $1}')
+	    intf=$(cat ${BAYAN_PATH}/conn.lst | awk -v n="$N" 'NR==n {print $2}')
             ip route add ${mesh_ip%.*}.0/24 dev ${neigh_if} proto kernel scope link src ${mesh_ip} table ${N}
             ip route add ${homenet_ip%.*}.0/24 dev ${homenet_if} proto kernel scope link src ${homenet_ip} table ${N}
             ip route add default via ${gw} dev ${intf} table ${N}
         done
-        create_ap ${homenet_if} ${ap_if} ${ssid} ${ap_pwd} &
+        create_ap ${ap_if} ${homenet_if} ${ssid} ${ap_pwd} &
     ;;
 
     "install")
         iptables-save > ${BAYAN_PATH}/iptables.ORIGINAL
-        echo "#!/bin/bash" > iprule.ORIGINAL
+        echo "#!/bin/bash" > ${BAYAN_PATH}/iprule.ORIGINAL
         ip rule show | sed 's/[:-]/ /g' | awk '$0="ip rule add priority "$0' >> ${BAYAN_PATH}/iprule.ORIGINAL
-        chmod +x iprule.ORIGINAL
+        chmod +x ${BAYAN_PATH}/iprule.ORIGINAL
         if [[ "$neigh_if" == "bat0" ]]; then
             batman_begins
         fi
