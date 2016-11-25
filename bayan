@@ -60,7 +60,6 @@ load() {
     done
 
     iptables-save > ${BAYAN_PATH}/bayan_iptables
-    echo "#!/bin/bash" > ${BAYAN_PATH}/bayan_iprules
     ip rule show | sed 's/[:-]/ /g' | awk '$0="ip rule add priority "$0' >> ${BAYAN_PATH}/bayan_iprules
     chmod +x ${BAYAN_PATH}/bayan_iprules
 }
@@ -89,7 +88,6 @@ case "$1" in
 
     "install")
         iptables-save > ${BAYAN_PATH}/iptables.ORIGINAL
-        echo "#!/bin/bash" > ${BAYAN_PATH}/iprule.ORIGINAL
         ip rule show | sed 's/[:-]/ /g' | awk '$0="ip rule add priority "$0' >> ${BAYAN_PATH}/iprule.ORIGINAL
         chmod +x ${BAYAN_PATH}/iprule.ORIGINAL
         if [[ "$neigh_if" == "bat0" ]]; then
@@ -133,7 +131,6 @@ case "$1" in
         iptables -t mangle -I PREROUTING ${N} -i ${client_if} -m conntrack --ctstate     NEW -m statistic --mode random --probability ${prob} -j MARK${N}
 
         iptables-save > ${BAYAN_PATH}/bayan_iptables
-        echo "#!/bin/bash" > ${BAYAN_PATH}/bayan_iprules
         ip rule show | sed 's/[:-]/ /g' | awk '$0="ip rule add priority "$0' >> ${BAYAN_PATH}/bayan_iprules
         chmod +x ${BAYAN_PATH}/bayan_iprules
     ;;
