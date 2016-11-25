@@ -1,4 +1,3 @@
-#!/bin/bash
 BAYAN_PATH=${HOME}/bayan
 source ${BAYAN_PATH}/bayan.conf
 
