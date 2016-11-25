@@ -81,7 +81,10 @@ case "$1" in
             ip route add ${homenet_ip%.*}.0/24 dev ${homenet_if} proto kernel scope link src ${homenet_ip} table ${N}
             ip route add default via ${gw} dev ${intf} table ${N}
         done
-        create_ap ${ap_if} ${homenet_if} ${ssid} ${ap_pwd} &
+        if [[ "$openwrt" == "false" ]]; then
+            create_ap ${ap_if} ${homenet_if} ${ssid} ${ap_pwd} &
+
+        fi
     ;;
 
     "install")
